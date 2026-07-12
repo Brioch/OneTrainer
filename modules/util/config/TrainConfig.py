@@ -138,6 +138,7 @@ class TrainOptimizerConfig(BaseConfig):
     approx_mars: False
     auto_kappa_p: False
     compile: False
+    polarity_history: int
 
     def __init__(self, data: list[(str, Any, type, bool)]):
         super().__init__(data)
@@ -251,6 +252,7 @@ class TrainOptimizerConfig(BaseConfig):
         data.append(("approx_mars", False, bool, False))
         data.append(("auto_kappa_p", False, bool, False))
         data.append(("compile", False, bool, False))
+        data.append(("polarity_history", None, int, True))
 
         return TrainOptimizerConfig(data)
 
