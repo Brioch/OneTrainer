@@ -667,6 +667,19 @@ def create_optimizer(
                 quant_block_size=optimizer_config.quant_block_size if optimizer_config.quant_block_size is not None else 2048
             )
 
+        # Automagic3 Optimizer
+        case Optimizer.AUTOMAGIC3:
+            from modules.util.optimizer.automagic3 import Automagic3
+            optimizer = Automagic3(
+                params=parameters,
+                lr=config.learning_rate,
+                beta2=optimizer_config.beta2 if optimizer_config.beta2 is not None else 0.999,
+                eps=optimizer_config.eps if optimizer_config.eps is not None else 1e-30,
+                clip_threshold=optimizer_config.clip_threshold if optimizer_config.clip_threshold is not None else 1.0,
+                weight_decay=optimizer_config.weight_decay if optimizer_config.weight_decay is not None else 0.0,
+                polarity_history=optimizer_config.polarity_history if optimizer_config.polarity_history is not None else 8,
+            )
+
         # ADAMW_ADV Optimizer
         case Optimizer.ADAMW_ADV:
             from adv_optm import AdamW_adv

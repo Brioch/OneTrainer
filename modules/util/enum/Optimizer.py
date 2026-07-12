@@ -66,6 +66,9 @@ class Optimizer(Enum):
     CAME = 'CAME'
     CAME_8BIT = 'CAME_8BIT'
 
+    # Automagic
+    AUTOMAGIC3 = 'AUTOMAGIC3'
+
     # MUON
     MUON = 'MUON'
     MUON_ADV = 'MUON_ADV'
@@ -88,6 +91,7 @@ class Optimizer(Enum):
             self.PRODIGY,
             self.PRODIGY_PLUS_SCHEDULE_FREE,
             self.PRODIGY_ADV,
+            self.AUTOMAGIC3,
         ]
 
     @property

@@ -436,6 +436,13 @@ OPTIMIZER_DEFAULT_PARAMETERS = {
         "use_cautious": False,
         "fused_back_pass": False,
     },
+    Optimizer.AUTOMAGIC3: {
+        "beta2": 0.999,
+        "eps": 1e-30,
+        "clip_threshold": 1.0,
+        "weight_decay": 0.0,
+        "polarity_history": 8,
+    },
     Optimizer.CAME_8BIT: {
         "beta1": 0.9,
         "beta2": 0.999,
