@@ -1,0 +1,406 @@
+#
+# Copied and modified from the Automagic v3 optimizer in ostris/ai-toolkit
+# (https://github.com/ostris/ai-toolkit, toolkit/optimizers/automagic3.py).
+#
+# OneTrainer integration notes:
+#   * The upstream optimizer defaults to a "fused" mode that updates each
+#     parameter inside the backward pass via register_post_accumulate_grad_hook.
+#     That bypasses OneTrainer's gradient clipping / NaN-skip and is incompatible
+#     with multi-backward gradient accumulation, and OneTrainer's own fused path
+#     never calls optimizer.step() (leaving no place for the once-per-step group
+#     vote). We therefore run Automagic3 as an ordinary optimizer: OneTrainer
+#     accumulates grads in p.grad, clips / NaN-skips, then calls step(), where
+#     Automagic3 does all of its work. No grad hooks are registered here.
+#   * step() applies each group's mean adaptive learning rate to
+#     group["effective_lr"] so OneTrainer can report the true (adaptive) LR to
+#     TensorBoard via Optimizer.maybe_adjust_lrs (the is_adaptive path).
+#
+
+from typing import List
+
+import torch
+
+
+class Automagic3(torch.optim.Optimizer):
+    """
+    Automagic v3.
+
+    A single learning rate is kept per param group. The control principle: the
+    lr RISES while elements hold a decisively consistent update direction at the
+    current step size, FALLS while their signs decisively alternate (the
+    overshoot signature), and HOLDS on everything in between, which is treated as
+    noise.
+
+    Each element keeps a window of its last H (= ``polarity_history``) update
+    sign bits (1-bit packed). Only the two perfectly decisive window states vote:
+
+      up    all H signs agree            +1 * |update|  ("step too small")
+      down  all H-1 transitions flip     -1 * |update|  ("step too large")
+      else  any imperfect window          0  (noise)
+
+    Every element of every tensor in the group votes into a single pool, and the
+    group lr is nudged once per step by the pooled result, applied
+    multiplicatively with no gain knob: ``lr *= exp(vote)``. Pooling at group
+    level keeps coupled tensors (e.g. a Q/K pair) from fighting over per-tensor
+    learning rates and diverging.
+
+    Second-moment EMA state is stored in ``p.dtype`` (math runs in fp32 when the
+    state is lower precision). Updates to low-precision (bf16/fp16) parameters
+    are applied in fp32 and stochastically rounded on write-back.
+
+    Parameters
+    ----------
+    lr : float
+        Starting learning rate for every group; the controller adapts away from
+        it in whichever direction the pooled vote points.
+    beta2 : float
+        EMA decay for the second moment, as in Adam/Adafactor.
+    eps : float
+        Floor added to the second moment before the rsqrt.
+    clip_threshold : float
+        Trust region on the update: its RMS is scaled to <= this, then every
+        element is clamped to +/- this.
+    weight_decay : float
+        Decoupled (AdamW-style) weight decay; 0 disables it.
+    polarity_history : int
+        Sign-history window length H (2 to 64); H/8 bytes of state per element.
+    """
+
+    def __init__(
+        self,
+        params,
+        lr: float = 1e-6,
+        beta2: float = 0.999,
+        eps: float = 1e-30,
+        clip_threshold: float = 1.0,
+        weight_decay: float = 0.0,
+        polarity_history: int = 8,
+    ):
+        if lr > 1e-3:
+            print(
+                f"Note: start lr {lr} is high; the controller will correct it "
+                f"(the pooled vote will walk it down)."
+            )
+        defaults = dict(
+            lr=lr,
+            beta2=beta2,
+            eps=eps,
+            clip_threshold=clip_threshold,
+            weight_decay=weight_decay,
+            polarity_history=max(2, min(64, int(polarity_history))),
+        )
+        super().__init__(params, defaults)
+
+        self._rebuild_group_index()
+
+        total = sum(p.numel() for g in self.param_groups for p in g["params"])
+        print(f"Total training paramiters: {total:,}")
+
+    @staticmethod
+    def _rms(t: torch.Tensor) -> torch.Tensor:
+        return t.norm(2) / (t.numel() ** 0.5)
+
+    @staticmethod
+    def _approx_sq_grad(row: torch.Tensor, col: torch.Tensor) -> torch.Tensor:
+        r = (row / row.mean(dim=-1, keepdim=True)).rsqrt_().unsqueeze(-1)
+        c = col.unsqueeze(-2).rsqrt()
+        return torch.mul(r, c)
+
+    @staticmethod
+    def _sr_truncate(v_fp32: torch.Tensor, drop_bits: int) -> torch.Tensor:
+        as_int = v_fp32.view(torch.int32)
+        as_int.add_(torch.randint_like(as_int, 1 << drop_bits))
+        as_int.bitwise_and_(-(1 << drop_bits))
+        return v_fp32
+
+    @staticmethod
+    def _stochastic_round(v: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+        finfo = torch.finfo(dtype)
+        absv = v.abs().clamp_(min=finfo.tiny)
+        ulp = torch.exp2(torch.floor(torch.log2(absv))).mul_(finfo.eps)
+        noise = torch.rand_like(v).sub_(0.5).mul_(ulp)
+        return v.add_(noise).to(dtype)
+
+    _PACK_CONSTS: dict = {}
+
+    @classmethod
+    def _pack_consts(cls, device):
+        consts = cls._PACK_CONSTS.get(device)
+        if consts is None:
+            consts = (
+                torch.tensor(
+                    [1, 2, 4, 8, 16, 32, 64, 128], device=device, dtype=torch.uint8
+                ),
+                torch.tensor(
+                    [0, 1, 2, 3, 4, 5, 6, 7], device=device, dtype=torch.uint8
+                ),
+            )
+            cls._PACK_CONSTS[device] = consts
+        return consts
+
+    @classmethod
+    def _pack_bits(cls, bits: torch.Tensor) -> torch.Tensor:
+        weights, _ = cls._pack_consts(bits.device)
+        flat = bits.reshape(-1).to(torch.uint8)
+        pad = (-flat.numel()) % 8
+        if pad:
+            flat = torch.cat([flat, flat.new_zeros(pad)])
+        return (flat.view(-1, 8) * weights).sum(-1, dtype=torch.uint8)
+
+    @classmethod
+    def _unpack_bits(cls, packed: torch.Tensor, numel: int) -> torch.Tensor:
+        _, shifts = cls._pack_consts(packed.device)
+        vals = (packed.unsqueeze(-1) >> shifts).bitwise_and_(1)
+        return vals.view(-1)[:numel]
+
+    def _rebuild_group_index(self) -> None:
+        self._param_group_index = {
+            p: gi for gi, group in enumerate(self.param_groups) for p in group["params"]
+        }
+        self._group_num: List = [None] * len(self.param_groups)
+        self._group_den: List = [None] * len(self.param_groups)
+
+    @classmethod
+    def _stochastic_copy_(cls, dst: torch.Tensor, src_fp32: torch.Tensor) -> None:
+        if dst.dtype == torch.bfloat16:
+            dst.copy_(cls._sr_truncate(src_fp32, 16))
+        elif dst.dtype == torch.float16:
+            dst.copy_(cls._sr_truncate(src_fp32, 13))
+        else:
+            dst.copy_(cls._stochastic_round(src_fp32, dst.dtype))
+
+    def _init_state(self, p: torch.Tensor, group: dict) -> None:
+        state = self.state[p]
+        state["step"] = 0
+        state["lr"] = torch.tensor(
+            float(group["lr"]), dtype=torch.float32, device=p.device
+        )
+        H = group["polarity_history"]
+        width = (p.numel() + 7) // 8
+        state["sign_history"] = torch.zeros(
+            (H, width), dtype=torch.uint8, device=p.device
+        )
+        state["hist_idx"] = 0
+        state["hist_fill"] = 0
+        if p.dim() >= 2:
+            state["exp_avg_sq_row"] = torch.zeros(
+                p.shape[:-1], dtype=p.dtype, device=p.device
+            )
+            state["exp_avg_sq_col"] = torch.zeros(
+                p.shape[:-2] + p.shape[-1:], dtype=p.dtype, device=p.device
+            )
+        else:
+            state["exp_avg_sq"] = torch.zeros(p.shape, dtype=p.dtype, device=p.device)
+
+    @torch.no_grad()
+    def _update_param(self, p: torch.Tensor, group: dict) -> None:
+        if p.grad is None:
+            return
+        state = self.state[p]
+        if len(state) == 0:
+            self._init_state(p, group)
+
+        grad = p.grad
+        if grad.is_sparse:
+            raise RuntimeError("Automagic3 does not support sparse gradients.")
+        if grad.dtype != torch.float32:
+            grad = grad.to(torch.float32)
+
+        grad.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
+
+        beta2 = group["beta2"]
+        eps = group["eps"]
+        sq = grad * grad
+
+        if p.dim() >= 2:
+            row_state = state["exp_avg_sq_row"]
+            col_state = state["exp_avg_sq_col"]
+            if row_state.dtype == torch.float32:
+                row, col = row_state, col_state
+                row.mul_(beta2).add_(sq.mean(dim=-1).add_(eps), alpha=1.0 - beta2)
+                col.mul_(beta2).add_(sq.mean(dim=-2).add_(eps), alpha=1.0 - beta2)
+            else:
+                row = row_state.to(torch.float32)
+                col = col_state.to(torch.float32)
+                row.mul_(beta2).add_(sq.mean(dim=-1).add_(eps), alpha=1.0 - beta2)
+                col.mul_(beta2).add_(sq.mean(dim=-2).add_(eps), alpha=1.0 - beta2)
+                row_state.copy_(row.to(row_state.dtype))
+                col_state.copy_(col.to(col_state.dtype))
+            update = self._approx_sq_grad(row, col).mul_(grad)
+        else:
+            v_state = state["exp_avg_sq"]
+            if v_state.dtype == torch.float32:
+                v = v_state
+                v.mul_(beta2).add_(sq, alpha=1.0 - beta2)
+            else:
+                v = v_state.to(torch.float32)
+                v.mul_(beta2).add_(sq, alpha=1.0 - beta2)
+                v_state.copy_(v.to(v_state.dtype))
+            update = v.add(eps).rsqrt().mul_(grad)
+
+        update.div_((self._rms(update) / group["clip_threshold"]).clamp_(min=1.0))
+        update.clamp_(-group["clip_threshold"], group["clip_threshold"])
+
+        cur_bits = update.gt(0.0)
+        hist = state["sign_history"]
+        idx = state["hist_idx"]
+        H = hist.shape[0]
+
+        hist[idx].copy_(self._pack_bits(cur_bits))
+        state["hist_idx"] = (idx + 1) % H
+        fill = min(H, state["hist_fill"] + 1)
+        state["hist_fill"] = fill
+
+        if fill == H:
+            _, shifts = self._pack_consts(hist.device)
+            chron = torch.roll(hist, -state["hist_idx"], dims=0)
+            bits = (
+                (chron.unsqueeze(-1) >> shifts)
+                .bitwise_and_(1)
+                .view(H, -1)[:, : update.numel()]
+            )
+            s1 = bits.sum(0, dtype=torch.int16)
+            flips = (bits[1:] ^ bits[:-1]).sum(0, dtype=torch.int16)
+            up = s1.eq(H).logical_or_(s1.eq(0))
+            down = flips.eq(H - 1)
+            w = update.abs().view(-1)
+            num = (w * up).sum().sub_((w * down).sum())
+            den = w.sum()
+            gi = self._param_group_index.get(p)
+            if gi is not None:
+                if self._group_num[gi] is None:
+                    self._group_num[gi] = num
+                    self._group_den[gi] = den
+                else:
+                    acc = self._group_num[gi]
+                    if num.device != acc.device:
+                        num = num.to(acc.device)
+                        den = den.to(acc.device)
+                    acc.add_(num)
+                    self._group_den[gi].add_(den)
+
+        state["step"] += 1
+
+        wd = group["weight_decay"]
+        lr_t = state["lr"]
+
+        if p.dtype == torch.float32:
+            if wd != 0.0:
+                update.add_(p, alpha=wd)
+            p.addcmul_(update, lr_t, value=-1.0)
+        else:
+            new_p_fp32 = p.to(torch.float32)
+            if wd != 0.0:
+                update.add_(new_p_fp32, alpha=wd)
+            new_p_fp32.addcmul_(update, lr_t, value=-1.0)
+            self._stochastic_copy_(p, new_p_fp32)
+
+        p.grad = None
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+        for group in self.param_groups:
+            for p in group["params"]:
+                if not p.requires_grad:
+                    continue
+                if p.grad is None:
+                    continue
+                self._update_param(p, group)
+        self._apply_group_votes()
+        return loss
+
+    def _apply_group_votes(self) -> None:
+        for gi, group in enumerate(self.param_groups):
+            num = self._group_num[gi]
+            if num is not None:
+                den = self._group_den[gi]
+                signal = num.div_(den.clamp_(min=1e-30)).clamp_(-1.0, 1.0)
+                factor = torch.exp(signal)
+                for p in group["params"]:
+                    st = self.state.get(p)
+                    if st is None or "lr" not in st:
+                        continue
+                    lr_t = st["lr"]
+                    f = factor if factor.device == lr_t.device else factor.to(lr_t.device)
+                    lr_t.mul_(f).clamp_(min=1e-30, max=1e3)
+                self._group_num[gi] = None
+                self._group_den[gi] = None
+
+            # Expose the group's mean adaptive lr so OneTrainer can report the
+            # true (adaptive) learning rate to TensorBoard via maybe_adjust_lrs.
+            lrs = [
+                self.state[p]["lr"]
+                for p in group["params"]
+                if p in self.state and "lr" in self.state[p]
+            ]
+            if lrs:
+                group["effective_lr"] = float(torch.stack(lrs).mean())
+
+    def get_learning_rates(self) -> List[float]:
+        out = []
+        for group in self.param_groups:
+            lrs = [
+                self.state[p]["lr"]
+                for p in group["params"]
+                if p in self.state and "lr" in self.state[p]
+            ]
+            out.append(float(torch.stack(lrs).mean()) if lrs else float(group["lr"]))
+        return out
+
+    def get_avg_learning_rate(self) -> float:
+        lrs = self.get_learning_rates()
+        return sum(lrs) / len(lrs) if lrs else float(self.defaults["lr"])
+
+    def load_state_dict(self, state_dict):
+        super().load_state_dict(state_dict)
+        for group in self.param_groups:
+            for k, v in self.defaults.items():
+                group[k] = v
+            lrs = [
+                st["lr"]
+                for p in group["params"]
+                if (st := self.state.get(p)) is not None
+                and isinstance(st.get("lr"), torch.Tensor)
+            ]
+            med = None
+            if lrs:
+                dev = lrs[0].device
+                med = (
+                    torch.stack([t.to(torch.float32).to(dev) for t in lrs])
+                    .log_()
+                    .median()
+                    .exp_()
+                )
+            for p in group["params"]:
+                st = self.state.get(p)
+                if st is None:
+                    continue
+                if isinstance(st.get("lr"), torch.Tensor):
+                    st["lr"] = st["lr"].to(torch.float32)
+                    if med is not None:
+                        st["lr"].copy_(med.to(st["lr"].device))
+                numel = p.numel()
+                H = group["polarity_history"]
+                width = (numel + 7) // 8
+                sh = st.get("sign_history")
+                hist_ok = (
+                    isinstance(sh, torch.Tensor)
+                    and sh.shape == (H, width)
+                    and isinstance(st.get("hist_idx"), int)
+                    and 0 <= st["hist_idx"] < H
+                    and isinstance(st.get("hist_fill"), int)
+                    and 0 <= st["hist_fill"] <= H
+                )
+                if hist_ok:
+                    st["sign_history"] = sh.to(torch.uint8)
+                else:
+                    st["sign_history"] = torch.zeros(
+                        (H, width), dtype=torch.uint8, device=p.device
+                    )
+                    st["hist_idx"] = 0
+                    st["hist_fill"] = 0
+        self._rebuild_group_index()
