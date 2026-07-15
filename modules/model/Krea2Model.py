@@ -249,6 +249,11 @@ class Krea2Model(BaseModel):
                     attention_mask=tokens_mask,
                     position_ids=position_ids,
                     output_hidden_states=True,
+                    return_dict=True,
+                    # matches mgds EncodeQwenText: without this the KV cache defaults on and, under
+                    # the gradient-checkpointing/offload wrapper used while training an embedding, the
+                    # keys accumulate to 2x the query length (546 -> 1092) and SDPA's mask expand fails.
+                    use_cache=False,
                 )
                 # stack selected layers → (B, T, L, H); crop prefix; flatten to (B, T, L*H) so
                 # the shape matches the DataLoader's PruneMaskedTokens/PadMaskedTokens cache
