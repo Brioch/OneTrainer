@@ -1,0 +1,43 @@
+{
+    "base_model_name": "krea/Krea-2-Raw",
+    "batch_size": 1,
+    "model_type": "KREA_2",
+    "output_model_destination": "models/embedding.safetensors",
+    "output_model_format": "SAFETENSORS",
+    "resolution": "512",
+    "attention_mechanism": "CUDNN",
+    "compile": false,
+    "training_method": "EMBEDDING",
+    "latent_caching": true,
+    "learning_rate": 0.001,
+    "embedding_learning_rate": 0.001,
+    "preserve_embedding_norm": false,
+    "embedding_weight_dtype": "FLOAT_32",
+    "embedding": {
+        "placeholder": "<embedding>",
+        "train": true,
+        "token_count": 1,
+        "initial_embedding_text": "*",
+        "is_output_embedding": false
+    },
+    "transformer": {
+        "train": false,
+        "weight_dtype": "INT_W8A8",
+        "gradient_checkpointing": true,
+        "offload_fraction": 0.5
+    },
+    "text_encoder": {
+        "train": false,
+        "train_embedding": true,
+        "weight_dtype": "FLOAT_8",
+        "gradient_checkpointing": true,
+        "offload_fraction": 0.5
+    },
+    "vae": {
+        "weight_dtype": "FLOAT_32"
+    },
+    "train_dtype": "BFLOAT_16",
+    "weight_dtype": "BFLOAT_16",
+    "output_dtype": "FLOAT_32",
+    "timestep_distribution": "LOGIT_NORMAL"
+}

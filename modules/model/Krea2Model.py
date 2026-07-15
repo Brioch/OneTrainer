@@ -2,7 +2,8 @@ import math
 from contextlib import nullcontext
 from random import Random
 
-from modules.model.BaseModel import BaseModel
+from modules.model.BaseModel import BaseModel, BaseModelEmbedding
+from modules.module.AdditionalEmbeddingWrapper import AdditionalEmbeddingWrapper
 from modules.module.LoRAModule import LoRAModuleWrapper
 from modules.util.enum.ModelType import ModelType
 from modules.util.LayerOffloadConductor import LayerOffloadConductor
@@ -40,6 +41,22 @@ PROMPT_TEMPLATE_NUM_SUFFIX_TOKENS = 5
 PROMPT_MAX_LENGTH = 512
 
 
+class Krea2ModelEmbedding:
+    def __init__(
+            self,
+            uuid: str,
+            text_encoder_vector: Tensor | None,
+            placeholder: str,
+            is_output_embedding: bool,
+    ):
+        self.text_encoder_embedding = BaseModelEmbedding(
+            uuid=uuid,
+            placeholder=placeholder,
+            vector=text_encoder_vector,
+            is_output_embedding=is_output_embedding,
+        )
+
+
 class Krea2Model(BaseModel):
     # base model data
     tokenizer: Qwen2Tokenizer | None
@@ -53,6 +70,11 @@ class Krea2Model(BaseModel):
 
     text_encoder_offload_conductor: LayerOffloadConductor | None
     transformer_offload_conductor: LayerOffloadConductor | None
+
+    # persistent embedding training data
+    embedding: Krea2ModelEmbedding | None
+    additional_embeddings: list[Krea2ModelEmbedding] | None
+    embedding_wrapper: AdditionalEmbeddingWrapper | None
 
     # persistent lora training data
     transformer_lora: LoRAModuleWrapper | None
@@ -77,6 +99,10 @@ class Krea2Model(BaseModel):
         self.text_encoder_offload_conductor = None
         self.transformer_offload_conductor = None
 
+        self.embedding = None
+        self.additional_embeddings = []
+        self.embedding_wrapper = None
+
         self.transformer_lora = None
         self.lora_state_dict = None
 
@@ -84,6 +110,17 @@ class Krea2Model(BaseModel):
         return [a for a in [
             self.transformer_lora,
         ] if a is not None]
+
+    def all_embeddings(self) -> list[Krea2ModelEmbedding]:
+        return self.additional_embeddings \
+               + ([self.embedding] if self.embedding is not None else [])
+
+    def all_text_encoder_embeddings(self) -> list[BaseModelEmbedding]:
+        return [embedding.text_encoder_embedding for embedding in self.additional_embeddings] \
+               + ([self.embedding.text_encoder_embedding] if self.embedding is not None else [])
+
+    def add_text_encoder_embeddings_to_prompt(self, prompt: str) -> str:
+        return self._add_embeddings_to_prompt(self.all_text_encoder_embeddings(), prompt)
 
     def diffusers_to_original(self) -> list | None:
         # Krea 2's native checkpoint (krea/Krea-2-Raw's raw.safetensors) is a pure rename of the diffusers
@@ -178,6 +215,11 @@ class Krea2Model(BaseModel):
         if tokens is None and text is not None:
             if isinstance(text, str):
                 text = [text]
+
+            # expand any trained-embedding placeholders to their pseudo-tokens before tokenizing,
+            # so the appended token(s) land inside the (uncropped) prompt block and the encoder runs
+            # the trainable input row live each step
+            text = [self.add_text_encoder_embeddings_to_prompt(t) for t in text]
 
             # tokenize prefix+prompt to a fixed length (suffix appended separately so it sits
             # after the padding, matching the layout the model was trained with)

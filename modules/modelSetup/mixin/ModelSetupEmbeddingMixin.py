@@ -14,6 +14,7 @@ from transformers import (
     Gemma2Model,
     LlamaModel,
     PreTrainedTokenizer,
+    Qwen3VLModel,
     T5EncoderModel,
 )
 
@@ -27,7 +28,7 @@ class ModelSetupEmbeddingMixin(metaclass=ABCMeta):
             model: BaseModel,
             embedding_config: TrainEmbeddingConfig,
             tokenizer: PreTrainedTokenizer | None,
-            text_encoder: CLIPTextModel | CLIPTextModelWithProjection | T5EncoderModel | Gemma2Model | LlamaModel | None,
+            text_encoder: CLIPTextModel | CLIPTextModelWithProjection | T5EncoderModel | Gemma2Model | LlamaModel | Qwen3VLModel | None,
             create_output_embedding_fn: Callable[[str], Tensor] | None = None,
     ) -> Tensor | None:
         if tokenizer is None or text_encoder is None:

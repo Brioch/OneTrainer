@@ -2,13 +2,15 @@ from abc import ABCMeta
 from random import Random
 
 import modules.util.multi_gpu_util as multi
-from modules.model.Krea2Model import Krea2Model
+from modules.model.Krea2Model import Krea2Model, Krea2ModelEmbedding
 from modules.modelSetup.BaseModelSetup import BaseModelSetup
 from modules.modelSetup.mixin.ModelSetupDebugMixin import ModelSetupDebugMixin
 from modules.modelSetup.mixin.ModelSetupDiffusionLossMixin import ModelSetupDiffusionLossMixin
+from modules.modelSetup.mixin.ModelSetupEmbeddingMixin import ModelSetupEmbeddingMixin
 from modules.modelSetup.mixin.ModelSetupFlowMatchingMixin import ModelSetupFlowMatchingMixin
 from modules.modelSetup.mixin.ModelSetupNoiseMixin import ModelSetupNoiseMixin
 from modules.modelSetup.mixin.ModelSetupText2ImageMixin import ModelSetupText2ImageMixin
+from modules.module.AdditionalEmbeddingWrapper import AdditionalEmbeddingWrapper
 from modules.util.checkpointing_util import (
     enable_checkpointing_for_krea2_transformer,
     enable_checkpointing_for_qwen3vl_encoder_layers,
@@ -31,6 +33,7 @@ class BaseKrea2Setup(
     ModelSetupDebugMixin,
     ModelSetupNoiseMixin,
     ModelSetupFlowMatchingMixin,
+    ModelSetupEmbeddingMixin,
     ModelSetupText2ImageMixin,
     metaclass=ABCMeta
 ):
@@ -65,6 +68,72 @@ class BaseKrea2Setup(
         quantize_layers(model.transformer, self.train_device, model.train_dtype, config)
 
         self._set_attention_backend(model.transformer, config.attention_mechanism, mask=True)
+
+    def _setup_embeddings(
+            self,
+            model: Krea2Model,
+            config: TrainConfig,
+    ):
+        additional_embeddings = []
+        for embedding_config in config.all_embedding_configs():
+            embedding_state = model.embedding_state_dicts.get(embedding_config.uuid, None)
+            if embedding_state is None:
+                # input-embedding TI: initialise a new row in Qwen3-VL's token table from
+                # initial_embedding_text. Krea 2 does not support output embeddings (its
+                # conditioning is a (B, T, L=12, H) stack), so no create_output_embedding_fn.
+                embedding_state = self._create_new_embedding(
+                    model,
+                    embedding_config,
+                    model.tokenizer,
+                    model.text_encoder,
+                )
+            else:
+                embedding_state = embedding_state.get("qwen3vl_out", embedding_state.get("qwen3vl", None))
+
+            embedding_state = embedding_state.to(
+                dtype=model.text_encoder.get_input_embeddings().weight.dtype,
+                device=self.train_device,
+            ).detach()
+
+            embedding = Krea2ModelEmbedding(
+                embedding_config.uuid,
+                embedding_state,
+                embedding_config.placeholder,
+                embedding_config.is_output_embedding,
+            )
+            if embedding_config.uuid == config.embedding.uuid:
+                model.embedding = embedding
+            else:
+                additional_embeddings.append(embedding)
+
+        model.additional_embeddings = additional_embeddings
+
+        self._add_embeddings_to_tokenizer(model.tokenizer, model.all_text_encoder_embeddings())
+
+    def _setup_embedding_wrapper(
+            self,
+            model: Krea2Model,
+            config: TrainConfig,
+    ):
+        model.embedding_wrapper = AdditionalEmbeddingWrapper(
+            tokenizer=model.tokenizer,
+            orig_module=model.text_encoder.get_input_embeddings(),
+            embeddings=model.all_text_encoder_embeddings(),
+        )
+        model.embedding_wrapper.hook_to_module()
+
+    def _setup_embeddings_requires_grad(
+            self,
+            model: Krea2Model,
+            config: TrainConfig,
+    ):
+        for embedding, embedding_config in zip(model.all_text_encoder_embeddings(),
+                                               config.all_embedding_configs(), strict=True):
+            train_embedding = \
+                embedding_config.train \
+                and config.text_encoder.train_embedding \
+                and not self.stop_embedding_training_elapsed(embedding_config, model.train_progress)
+            embedding.requires_grad_(train_embedding)
 
     def predict(
             self,

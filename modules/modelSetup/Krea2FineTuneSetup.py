@@ -42,7 +42,10 @@ class Krea2FineTuneSetup(
         )
 
         if config.train_any_embedding() or config.train_any_output_embedding():
-            raise NotImplementedError("Embeddings not implemented for Krea 2")
+            self._add_embedding_param_groups(
+                model.all_text_encoder_embeddings(), parameter_group_collection, config.embedding_learning_rate,
+                "embeddings"
+            )
 
         return parameter_group_collection
 
@@ -51,6 +54,7 @@ class Krea2FineTuneSetup(
             model: Krea2Model,
             config: TrainConfig,
     ):
+        self._setup_embeddings_requires_grad(model, config)
         self._setup_model_part_requires_grad("transformer", model.transformer, config.transformer, model.train_progress)
         model.vae.requires_grad_(False)
         model.text_encoder.requires_grad_(False)
@@ -61,6 +65,12 @@ class Krea2FineTuneSetup(
             model: Krea2Model,
             config: TrainConfig,
     ):
+        if config.train_any_embedding():
+            model.text_encoder.get_input_embeddings().to(dtype=config.embedding_weight_dtype.torch_dtype())
+
+        self._setup_embeddings(model, config)
+        self._setup_embedding_wrapper(model, config)
+
         params = self.create_parameters(model, config)
         self.__setup_requires_grad(model, config)
         init_model_parameters(model, params, self.train_device)
@@ -71,7 +81,7 @@ class Krea2FineTuneSetup(
             config: TrainConfig,
     ):
         vae_on_train_device = not config.latent_caching
-        text_encoder_on_train_device = not config.latent_caching
+        text_encoder_on_train_device = config.train_any_embedding() or not config.latent_caching
 
         model.text_encoder_to(self.train_device if text_encoder_on_train_device else self.temp_device)
         model.vae_to(self.train_device if vae_on_train_device else self.temp_device)
@@ -91,4 +101,6 @@ class Krea2FineTuneSetup(
             config: TrainConfig,
             train_progress: TrainProgress
     ):
+        if config.preserve_embedding_norm and model.embedding_wrapper is not None:
+            model.embedding_wrapper.normalize_embeddings()
         self.__setup_requires_grad(model, config)

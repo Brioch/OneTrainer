@@ -1,7 +1,6 @@
 from modules.model.Krea2Model import Krea2Model
 from modules.modelSetup.BaseKrea2Setup import BaseKrea2Setup
 from modules.modelSetup.BaseModelSetup import BaseModelSetup
-from modules.module.LoRAModule import LoRAModuleWrapper
 from modules.util import factory
 from modules.util.config.TrainConfig import TrainConfig
 from modules.util.enum.ModelType import ModelType
@@ -13,8 +12,8 @@ from modules.util.TrainProgress import TrainProgress
 import torch
 
 
-@factory.register(BaseModelSetup, ModelType.KREA_2, TrainingMethod.LORA)
-class Krea2LoRASetup(
+@factory.register(BaseModelSetup, ModelType.KREA_2, TrainingMethod.EMBEDDING)
+class Krea2EmbeddingSetup(
     BaseKrea2Setup,
 ):
     def __init__(
@@ -36,13 +35,10 @@ class Krea2LoRASetup(
     ) -> NamedParameterGroupCollection:
         parameter_group_collection = NamedParameterGroupCollection()
 
-        self._create_model_part_parameters(parameter_group_collection, "transformer", model.transformer_lora, config.transformer)
-
-        if config.train_any_embedding() or config.train_any_output_embedding():
-            self._add_embedding_param_groups(
-                model.all_text_encoder_embeddings(), parameter_group_collection, config.embedding_learning_rate,
-                "embeddings"
-            )
+        self._add_embedding_param_groups(
+            model.all_text_encoder_embeddings(), parameter_group_collection, config.embedding_learning_rate,
+            "embeddings"
+        )
 
         return parameter_group_collection
 
@@ -52,32 +48,16 @@ class Krea2LoRASetup(
             config: TrainConfig,
     ):
         self._setup_embeddings_requires_grad(model, config)
-
         model.text_encoder.requires_grad_(False)
         model.transformer.requires_grad_(False)
         model.vae.requires_grad_(False)
-
-        self._setup_model_part_requires_grad("transformer", model.transformer_lora, config.transformer, model.train_progress)
 
     def setup_model(
             self,
             model: Krea2Model,
             config: TrainConfig,
     ):
-        model.transformer_lora = LoRAModuleWrapper(
-            model.transformer, "transformer", config, config.layer_filter.split(",")
-        )
-
-        if model.lora_state_dict:
-            model.transformer_lora.load_state_dict(model.lora_state_dict)
-            model.lora_state_dict = None
-
-        model.transformer_lora.set_dropout(config.dropout_probability)
-        model.transformer_lora.to(dtype=config.lora_weight_dtype.torch_dtype())
-        model.transformer_lora.hook_to_module()
-
-        if config.train_any_embedding():
-            model.text_encoder.get_input_embeddings().to(dtype=config.embedding_weight_dtype.torch_dtype())
+        model.text_encoder.get_input_embeddings().to(dtype=config.embedding_weight_dtype.torch_dtype())
 
         self._setup_embeddings(model, config)
         self._setup_embedding_wrapper(model, config)
@@ -91,20 +71,15 @@ class Krea2LoRASetup(
             model: Krea2Model,
             config: TrainConfig,
     ):
-        vae_on_train_device = not config.latent_caching
-        text_encoder_on_train_device = config.train_any_embedding() or not config.latent_caching
+        vae_on_train_device = self.debug_mode
 
-        model.text_encoder_to(self.train_device if text_encoder_on_train_device else self.temp_device)
+        model.text_encoder_to(self.train_device)
         model.vae_to(self.train_device if vae_on_train_device else self.temp_device)
         model.transformer_to(self.train_device)
 
         model.text_encoder.eval()
         model.vae.eval()
-
-        if config.transformer.train:
-            model.transformer.train()
-        else:
-            model.transformer.eval()
+        model.transformer.eval()
 
     def after_optimizer_step(
             self,

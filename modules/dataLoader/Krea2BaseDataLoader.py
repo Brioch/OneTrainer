@@ -23,6 +23,7 @@ from mgds.pipelineModules.DecodeTokens import DecodeTokens
 from mgds.pipelineModules.DecodeVAE import DecodeVAE
 from mgds.pipelineModules.EncodeQwenText import EncodeQwenText
 from mgds.pipelineModules.EncodeVAE import EncodeVAE
+from mgds.pipelineModules.MapData import MapData
 from mgds.pipelineModules.PadMaskedTokens import PadMaskedTokens
 from mgds.pipelineModules.PruneMaskedTokens import PruneMaskedTokens
 from mgds.pipelineModules.RescaleImageChannels import RescaleImageChannels
@@ -43,6 +44,9 @@ class Krea2BaseDataLoader(
         encode_image = EncodeVAE(in_name='image', out_name='latent_image_distribution', vae=model.vae, autocast_contexts=[model.autocast_context], dtype=model.train_dtype.torch_dtype())
         image_sample = SampleVAEDistribution(in_name='latent_image_distribution', out_name='latent_image', mode='mean')
         downscale_mask = ScaleImage(in_name='mask', out_name='latent_mask', factor=0.125)
+        # expand any trained-embedding placeholders to their pseudo-tokens before tokenizing, so the
+        # appended token(s) sit inside the (uncropped) user-prompt block and map to the new table rows.
+        add_embeddings_to_prompt = MapData(in_name='prompt', out_name='prompt', map_fn=model.add_text_encoder_embeddings_to_prompt)
         # prefix+prompt padded to a fixed length, suffix tokenized unpadded and appended after -
         # mirrors Krea2Model.encode_text's mid-template padding layout exactly.
         tokenize_prompt = Tokenize(in_name='prompt', tokens_out_name='tokens', mask_out_name='tokens_mask', tokenizer=model.tokenizer, max_token_length=PROMPT_MAX_LENGTH,
@@ -57,7 +61,7 @@ class Krea2BaseDataLoader(
         if config.masked_training or config.model_type.has_mask_input():
             modules.append(downscale_mask)
 
-        modules.append(tokenize_prompt)
+        modules += [add_embeddings_to_prompt, tokenize_prompt]
 
         if not config.train_text_encoder_or_embedding():
             modules.append(encode_prompt)
