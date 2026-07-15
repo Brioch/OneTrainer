@@ -9,6 +9,7 @@
     "compile": false,
     "training_method": "EMBEDDING",
     "latent_caching": true,
+    "dataloader_threads": 1,
     "learning_rate": 0.001,
     "embedding_learning_rate": 0.001,
     "preserve_embedding_norm": false,
@@ -39,5 +40,9 @@
     "train_dtype": "BFLOAT_16",
     "weight_dtype": "BFLOAT_16",
     "output_dtype": "FLOAT_32",
-    "timestep_distribution": "LOGIT_NORMAL"
+    "timestep_distribution": "LOGIT_NORMAL",
+    "quantization": {
+        "layer_filter": "transformer_blocks",
+        "layer_filter_preset": "blocks"
+    }
 }
