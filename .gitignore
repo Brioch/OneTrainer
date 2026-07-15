@@ -1,5 +1,6 @@
 # development
 .idea
+/requirements-uv.txt
 *.bak
 *.pyc
 *.swp
@@ -38,3 +39,4 @@ train.bat
 debug_report.log
 config_diff.txt
 CLAUDE.md
+/scripts/gen-uv-requirements.sh
