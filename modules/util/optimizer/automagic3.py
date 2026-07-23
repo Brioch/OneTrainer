@@ -53,6 +53,14 @@ class Automagic3(torch.optim.Optimizer):
     lr : float
         Starting learning rate for every group; the controller adapts away from
         it in whichever direction the pooled vote points.
+    min_lr : float
+        Lower bound on the adapted lr (default 1e-8). At the default this is a
+        numerical guard well below the usable range; raise it to put a hard
+        floor under the controller.
+    max_lr : float
+        Upper bound on the adapted lr (default 1e3). At the default this is a
+        numerical guard well above the usable range; lower it to put a hard
+        ceiling on the controller.
     beta2 : float
         EMA decay for the second moment, as in Adam/Adafactor.
     eps : float
@@ -70,12 +78,16 @@ class Automagic3(torch.optim.Optimizer):
         self,
         params,
         lr: float = 1e-6,
+        min_lr: float = 1e-8,
+        max_lr: float = 1e3,
         beta2: float = 0.999,
         eps: float = 1e-30,
         clip_threshold: float = 1.0,
         weight_decay: float = 0.0,
         polarity_history: int = 8,
     ):
+        if min_lr > max_lr:
+            raise ValueError(f"min_lr ({min_lr}) must be <= max_lr ({max_lr})")
         if lr > 1e-3:
             print(
                 f"Note: start lr {lr} is high; the controller will correct it "
@@ -83,6 +95,8 @@ class Automagic3(torch.optim.Optimizer):
             )
         defaults = dict(
             lr=lr,
+            min_lr=min_lr,
+            max_lr=max_lr,
             beta2=beta2,
             eps=eps,
             clip_threshold=clip_threshold,
@@ -173,7 +187,9 @@ class Automagic3(torch.optim.Optimizer):
         state = self.state[p]
         state["step"] = 0
         state["lr"] = torch.tensor(
-            float(group["lr"]), dtype=torch.float32, device=p.device
+            min(max(float(group["lr"]), group["min_lr"]), group["max_lr"]),
+            dtype=torch.float32,
+            device=p.device,
         )
         H = group["polarity_history"]
         width = (p.numel() + 7) // 8
@@ -326,7 +342,7 @@ class Automagic3(torch.optim.Optimizer):
                         continue
                     lr_t = st["lr"]
                     f = factor if factor.device == lr_t.device else factor.to(lr_t.device)
-                    lr_t.mul_(f).clamp_(min=1e-30, max=1e3)
+                    lr_t.mul_(f).clamp_(min=group["min_lr"], max=group["max_lr"])
                 self._group_num[gi] = None
                 self._group_den[gi] = None
 
