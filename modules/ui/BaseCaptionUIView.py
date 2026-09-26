@@ -24,6 +24,9 @@ class BaseCaptionUIView(ABC):
     @abstractmethod
     def fill_mask_editing_mode(self, *args): pass
 
+    @abstractmethod
+    def stretch_column(self, frame, column): pass
+
     def build_top_bar(self, frame, controller, ui_state):
         self.components.button(frame, 0, 0, "Open", self.open_directory,
                           tooltip="open a new directory")
@@ -39,7 +42,7 @@ class BaseCaptionUIView(ABC):
         self.components.switch(frame, 0, 4, ui_state, "include_subdirectories",
                           text="include subdirectories")
 
-        frame.grid_columnconfigure(5, weight=1)
+        self.stretch_column(frame, 5)
 
         self.components.button(frame, 0, 6, "Help", controller.print_help,
                           tooltip=controller.help_text)
