@@ -120,6 +120,19 @@ class PeftBase(nn.Module):
         assert self._orig_module is not None
         return self._orig_module[0]
 
+    def _adapter_device(self) -> torch.device:
+        # a streamed base (stream from disk) is still a meta skeleton when the adapter is created; build the
+        # adapter on cpu instead -- BaseModel._move_part moves it to the train device together with the LoRA wrapper
+        device = self.orig_module.weight.device
+        return torch.device("cpu") if device.type == "meta" else device
+
+    def _check_base_weight_available(self):
+        # DoRA / weight decomposition read the real base weight at creation to compute dora_scale
+        if self.orig_module.weight.is_meta:
+            raise ValueError(
+                f"{self.prefix.removesuffix('.')}: DoRA / weight decomposition needs the base weights at adapter "
+                f"creation; disable 'stream from disk' for this model part.")
+
     def load_state_dict(self, state_dict: Mapping[str, Any],
                         strict: bool = True, assign: bool = False):
         state_dict = {k.removeprefix(self.prefix): v for (k, v) in state_dict.items() if k.startswith(self.prefix)}
@@ -146,7 +159,7 @@ class PeftBase(nn.Module):
         Does not perform initialization, as that usually depends on the PEFT
         method.
         """
-        device = self.orig_module.weight.device
+        device = self._adapter_device()
         match self.orig_module:
             case nn.Linear():
                 in_features = self.orig_module.in_features
@@ -248,7 +261,7 @@ class LoHaModule(PeftBase):
 
         if orig_module is not None:
             self.initialize_weights()
-            self.alpha = self.alpha.to(orig_module.weight.device)
+            self.alpha = self.alpha.to(self._adapter_device())
         self.alpha.requires_grad_(False)
 
     def initialize_weights(self):
@@ -326,13 +339,13 @@ class LoKrModule(PeftBase):
 
         if orig_module is not None:
             self.initialize_weights()
-            self.alpha = self.alpha.to(orig_module.weight.device)
+            self.alpha = self.alpha.to(self._adapter_device())
         self.alpha.requires_grad_(False)
 
     def initialize_weights(self):
         self._initialized = True
         lokr_dim = self.dim
-        device = self.orig_module.weight.device
+        device = self._adapter_device()
 
         factor = -1 if self.decompose_factor < 0 else self.decompose_factor
 
@@ -425,6 +438,7 @@ class LoKrModule(PeftBase):
             nn.init.constant_(self.lokr_w2_b, 0)
 
         if self.weight_decompose:
+            self._check_base_weight_available()
             if isinstance(self.orig_module, nn.Linear):
                 orig_weight = get_unquantized_weight(self.orig_module, torch.float, self.train_device)
             else:
@@ -437,7 +451,7 @@ class LoKrModule(PeftBase):
                 dora_scale_val = torch.norm(orig_weight.transpose(1, 0).reshape(orig_weight.shape[1], -1), dim=1, keepdim=True).reshape(orig_weight.shape[1], *[1] * dora_num_dims).transpose(0, 1)
 
             self.dora_scale = Parameter(
-                dora_scale_val.to(device=self.orig_module.weight.device)
+                dora_scale_val.to(device=self._adapter_device())
             )
             del orig_weight
 
@@ -554,7 +568,7 @@ class LoRAModule(PeftBase):
 
         if orig_module is not None:
             self.initialize_weights()
-            self.alpha = self.alpha.to(orig_module.weight.device)
+            self.alpha = self.alpha.to(self._adapter_device())
         self.alpha.requires_grad_(False)
 
     def initialize_weights(self):
@@ -743,6 +757,7 @@ class DoRAModule(LoRAModule):
     def initialize_weights(self):
         super().initialize_weights()
 
+        self._check_base_weight_available()
         if isinstance(self.orig_module, nn.Linear):
             orig_weight = get_unquantized_weight(self.orig_module, torch.float, self.train_device)
         else:
@@ -759,7 +774,7 @@ class DoRAModule(LoRAModule):
                     orig_weight.reshape(orig_weight.shape[0], -1),
                     dim=1, keepdim=True)
                 .reshape(orig_weight.shape[0], *[1] * self.dora_num_dims)
-                .to(device=self.orig_module.weight.device)
+                .to(device=self._adapter_device())
             )
         else:
             self.dora_scale = nn.Parameter(
@@ -768,7 +783,7 @@ class DoRAModule(LoRAModule):
                     dim=1, keepdim=True)
                 .reshape(orig_weight.shape[1], *[1] * self.dora_num_dims)
                 .transpose(1, 0)
-                .to(device=self.orig_module.weight.device)
+                .to(device=self._adapter_device())
             )
 
         del orig_weight
