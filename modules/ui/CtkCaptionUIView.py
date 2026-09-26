@@ -223,6 +223,9 @@ class CtkCaptionUIView(BaseCaptionUIView, ctk.CTkToplevel):
     def open_in_explorer(self):
         self.controller.open_in_explorer()
 
+    def stretch_column(self, frame, column):
+        frame.grid_columnconfigure(column, weight=1)
+
     def destroy(self):
         self.controller._release_models()
         super().destroy()
