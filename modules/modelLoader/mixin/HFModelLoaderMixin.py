@@ -152,10 +152,12 @@ def stream_module_from_checkpoint(
     # flat work list of every checkpoint-backed skeleton tensor, so the reader threads below can drive the reads.
     work = []  # (key, sub_module, tensor_name, is_buffer, module_name)
     for name, sub_module in module.named_modules():
-        module_name = name.split(".")[-1]
         # gradient checkpointing in compile mode wraps each block in a CheckpointLayer, inserting a ".checkpoint."
         # level into the live path; the checkpoint keys have none, so strip it before lookup (as LoRAModule does).
-        lookup_name = name.replace(".checkpoint.", ".")
+        # The wrapped block itself is named "...N.checkpoint" with no trailing dot, so strip on a dot-terminated name,
+        # else tensors held directly by the block (e.g. Krea 2's scale_shift_table) are never streamed and stay meta.
+        lookup_name = f"{name}.".replace(".checkpoint.", ".")[:-1]
+        module_name = lookup_name.split(".")[-1]
         for tensor_name, param in list(sub_module.named_parameters(recurse=False)):
             key = ".".join(p for p in (key_prefix, lookup_name, tensor_name) if p)
             if key in key_to_file and param.is_meta:
