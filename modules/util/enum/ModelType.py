@@ -42,6 +42,7 @@ class ModelType(Enum):
 
     ANIMA = 'ANIMA'
     KREA_2 = 'KREA_2'
+    MOSS_IMAGE = 'MOSS_IMAGE'
 
     Z_IMAGE = 'Z_IMAGE'
 
@@ -111,6 +112,9 @@ class ModelType(Enum):
     def is_krea2(self):
         return self == ModelType.KREA_2
 
+    def is_moss_image(self):
+        return self == ModelType.MOSS_IMAGE
+
     def is_sana(self):
         return self == ModelType.SANA
 
@@ -177,6 +181,7 @@ class ModelType(Enum):
             or self.is_qwen() \
             or self.is_anima() \
             or self.is_krea2() \
+            or self.is_moss_image() \
             or self.is_sana() \
             or self.is_hunyuan_video() \
             or self.is_hi_dream() \
@@ -209,6 +214,8 @@ class ModelType(Enum):
         if self.is_qwen() or self.is_z_image() or self.is_flux_2() or self.is_ernie() \
                 or self.is_anima() or self.is_krea2() or self.is_ideogram():
             return (TrainingMethod.FINE_TUNE, TrainingMethod.LORA)
+        if self.is_moss_image():
+            return (TrainingMethod.LORA,)
         raise ValueError(f"No supported training methods defined for model type {self}")
 
     def denoising_model_part(self) -> str:
@@ -314,6 +321,7 @@ _MODEL_PARTS: dict[ModelType, tuple[str, ...]] = {
     ModelType.CHROMA_1: ("transformer", "text_encoder", "vae"),
     ModelType.QWEN: ("transformer", "text_encoder", "vae"),
     ModelType.KREA_2: ("transformer", "text_encoder", "vae"),
+    ModelType.MOSS_IMAGE: ("transformer", "text_encoder", "vae"),
     ModelType.Z_IMAGE: ("transformer", "text_encoder", "vae"),
     ModelType.ERNIE: ("transformer", "text_encoder", "vae"),
     ModelType.IDEOGRAM_4: ("transformer", "text_encoder", "unconditional_transformer", "vae"),
@@ -349,6 +357,7 @@ _TRAINABLE_PARTS: dict[ModelType, tuple[str, ...]] = {
     ModelType.CHROMA_1: ("transformer", "text_encoder"),
     ModelType.QWEN: ("transformer", "text_encoder"),
     ModelType.KREA_2: ("transformer",),
+    ModelType.MOSS_IMAGE: ("transformer",),
     ModelType.Z_IMAGE: ("transformer",),
     ModelType.ERNIE: ("transformer",),
     ModelType.IDEOGRAM_4: ("transformer",),
