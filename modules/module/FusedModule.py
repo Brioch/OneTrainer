@@ -37,6 +37,10 @@ class _FusedLinear(nn.Linear, QuantizedLinearMixin):
     def forward(self, x, *args, **kwargs):
         return torch.cat([f(x) for f in self._leaf_forwards], dim=-1)
 
+    def mark_needs_requantization(self):
+        # owns no (quantized) weight: the leaves re-quantize themselves
+        pass
+
     @property
     def bias(self):
         # Derived live from the leaves (like unquantized_weight below), not materialized. The recompose
