@@ -13,9 +13,10 @@ from torch import Tensor
 from diffusers import AutoencoderKLFlux2, DiffusionPipeline, FlowMatchEulerDiscreteScheduler
 from transformers import Qwen2Tokenizer, Qwen3_5Model
 
-# Token budget for the chat-formatted prompt. The vendor allows up to 4096; captions rarely need more than a few
-# hundred tokens, and every encoded prompt is padded to this length before pruning.
-PROMPT_MAX_LENGTH = 512
+# Default token budget for the chat-formatted prompt, used when the "Text Encoder Sequence Length" setting is empty.
+# The vendor allows up to 4096; captions rarely need more than a few hundred tokens, and every prompt is padded to
+# this length before encoding, so a larger value makes text encoding slower.
+DEFAULT_PROMPT_MAX_LENGTH = 512
 
 # The vendor's inference default: the negative branch of CFG skips this main DiT block.
 DEFAULT_UNCOND_SKIP_LAYERS = (22,)
@@ -87,6 +88,7 @@ class MossImageModel(BaseModel):
             text: str | list[str] = None,
             tokens: Tensor = None,
             tokens_mask: Tensor = None,
+            text_encoder_sequence_length: int | None = None,
             text_encoder_dropout_probability: float | None = None,
             text_encoder_output: Tensor = None,
     ) -> tuple[Tensor, Tensor]:
@@ -100,7 +102,7 @@ class MossImageModel(BaseModel):
             ]
             tokenizer_output = self.tokenizer(
                 text,
-                max_length=PROMPT_MAX_LENGTH,
+                max_length=text_encoder_sequence_length or DEFAULT_PROMPT_MAX_LENGTH,
                 padding='max_length',
                 truncation=True,
                 return_tensors="pt",
