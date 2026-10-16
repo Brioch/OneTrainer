@@ -65,6 +65,7 @@ class MossImageSampler(BaseModelSampler):
             diffusion_steps: int,
             cfg_scale: float,
             noise_scheduler: NoiseScheduler,
+            text_encoder_sequence_length: int | None = None,
             on_update_progress: Callable[[int, int], None] = lambda _, __: None,
     ) -> ModelSamplerOutput:
         with self.model.autocast_context:
@@ -87,11 +88,13 @@ class MossImageSampler(BaseModelSampler):
             prompt_embedding, prompt_attention_mask = self.model.encode_text(
                 text=prompt,
                 train_device=self.train_device,
+                text_encoder_sequence_length=text_encoder_sequence_length,
             )
             if do_cfg:
                 negative_prompt_embedding, negative_prompt_attention_mask = self.model.encode_text(
                     text=negative_prompt,
                     train_device=self.train_device,
+                    text_encoder_sequence_length=text_encoder_sequence_length,
                 )
 
             # prepare latent image, sampled directly in fp32
@@ -167,6 +170,7 @@ class MossImageSampler(BaseModelSampler):
             diffusion_steps=sample_config.diffusion_steps,
             cfg_scale=sample_config.cfg_scale,
             noise_scheduler=sample_config.noise_scheduler,
+            text_encoder_sequence_length=sample_config.text_encoder_1_sequence_length,
             on_update_progress=on_update_progress,
         )
 

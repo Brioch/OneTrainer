@@ -4,7 +4,7 @@ from modules.dataLoader.BaseDataLoader import BaseDataLoader
 from modules.dataLoader.mixin.DataLoaderText2ImageMixin import DataLoaderText2ImageMixin
 from modules.model.MossImageModel import (
     CHAT_TEMPLATE_KWARGS,
-    PROMPT_MAX_LENGTH,
+    DEFAULT_PROMPT_MAX_LENGTH,
     MossImageModel,
     format_prompt,
 )
@@ -38,7 +38,7 @@ class MossImageBaseDataLoader(
         encode_image = EncodeVAE(in_name='image', out_name='latent_image_distribution', vae=model.vae, autocast_contexts=[model.autocast_context], dtype=model.train_dtype.torch_dtype())
         image_sample = SampleVAEDistribution(in_name='latent_image_distribution', out_name='latent_image', mode='mean')
         downscale_mask = ScaleImage(in_name='mask', out_name='latent_mask', factor=0.125)
-        tokenize_prompt = Tokenize(in_name='prompt', tokens_out_name='tokens', mask_out_name='tokens_mask', tokenizer=model.tokenizer, max_token_length=PROMPT_MAX_LENGTH,
+        tokenize_prompt = Tokenize(in_name='prompt', tokens_out_name='tokens', mask_out_name='tokens_mask', tokenizer=model.tokenizer, max_token_length=config.text_encoder_sequence_length or DEFAULT_PROMPT_MAX_LENGTH,
                                    apply_chat_template=format_prompt, apply_chat_template_kwargs=CHAT_TEMPLATE_KWARGS)
         # the last hidden state (index -1) is the final-normed one the vendor uses
         encode_prompt = EncodeQwenText(tokens_name='tokens', tokens_attention_mask_in_name='tokens_mask', hidden_state_out_name='text_encoder_hidden_state', tokens_attention_mask_out_name='tokens_mask',
@@ -82,7 +82,7 @@ class MossImageBaseDataLoader(
         )
 
     def _output_modules(self, config: TrainConfig, model: MossImageModel, model_setup: BaseMossImageSetup):
-        pad_masked_tokens = PadMaskedTokens(tokens_name='tokens', tokens_mask_name='tokens_mask', hidden_state_name='text_encoder_hidden_state', max_length=PROMPT_MAX_LENGTH)
+        pad_masked_tokens = PadMaskedTokens(tokens_name='tokens', tokens_mask_name='tokens_mask', hidden_state_name='text_encoder_hidden_state', max_length=config.text_encoder_sequence_length or DEFAULT_PROMPT_MAX_LENGTH)
 
         output_names = [
             'image_path', 'latent_image',
