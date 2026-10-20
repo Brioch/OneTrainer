@@ -1,7 +1,7 @@
 {
-    "base_model_name": "OpenMOSS-Team/MOSS-Image-SFT",
+    "base_model_name": "OpenMOSS-Team/MOSS-Image-Base",
     "batch_size": 2,
-    "learning_rate": 0.0003,
+    "learning_rate": 0.0001,
     "model_type": "MOSS_IMAGE",
     "output_model_format": "COMFY_LORA",
     "resolution": "1024",
@@ -22,11 +22,16 @@
     "train_dtype": "BFLOAT_16",
     "weight_dtype": "BFLOAT_16",
     "output_dtype": "BFLOAT_16",
-    "timestep_distribution": "LOGIT_NORMAL",
+    "timestep_distribution": "UNIFORM",
     "layer_filter": "layers.",
     "layer_filter_preset": "blocks",
     "quantization": {
         "layer_filter": "layers.",
         "layer_filter_preset": "blocks"
-    }
+    },
+    "lora_rank": 32,
+    "lora_alpha": 32.0,
+    "timestep_shift": 2.3,
+    "layer_filter_regex": false,
+    "epochs": 70
 }

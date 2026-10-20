@@ -64,14 +64,10 @@ class MossImageModel(BaseModel):
         self.transformer_lora = None
         self.lora_state_dict = None
 
-    def fusion_groups(self) -> list | None:
-        # The vendor checkpoint keeps q/k/v split; ComfyUI (and ai-toolkit) fuse them into proj.qkv.
-        return [
-            ("layers.{i}", ["proj.q", "proj.k", "proj.v"], "proj.qkv", "proj.qkv"),
-        ]
-
     def diffusers_to_original(self) -> list | None:
-        # Apart from the qkv fusion above, the native (ComfyUI) names are the vendor names.
+        # The native (ComfyUI) names are the vendor names, q/k/v split. No fusion_groups(): ComfyUI's MOSS LoRA
+        # convention addresses the separate projections and maps them onto fused checkpoints itself, so split keys
+        # work on both fused and unfused checkpoints, while fused proj.qkv keys would only match fused ones.
         return [
             ("{path}", "{path}"),
         ]
