@@ -46,8 +46,7 @@ class MossImageLoRASetup(
             config: TrainConfig,
     ):
         model.transformer_lora = LoRAModuleWrapper(
-            model.transformer, "transformer", config, config.layer_filter.split(","),
-            fusion_spec=model.fusion_groups(), fuse=config.output_model_format.needs_qkv_fusion(),
+            model.transformer, "transformer", config, config.layer_filter.split(",")
         )
 
         if model.lora_state_dict:
