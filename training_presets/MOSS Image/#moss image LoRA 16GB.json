@@ -23,7 +23,7 @@
     "train_dtype": "BFLOAT_16",
     "weight_dtype": "BFLOAT_16",
     "output_dtype": "BFLOAT_16",
-    "timestep_distribution": "UNIFORM",
+    "timestep_distribution": "LOGIT_NORMAL",
     "layer_filter": "layers.",
     "layer_filter_preset": "blocks",
     "quantization": {
@@ -32,7 +32,10 @@
     },
     "lora_rank": 32,
     "lora_alpha": 32.0,
-    "timestep_shift": 2.3,
+    "timestep_shift": 1.0,
     "layer_filter_regex": false,
-    "epochs": 70
+    "epochs": 70,
+    "clean_end_schedule": "60:7:30:15:2",
+    "noising_bias": 0.25,
+    "noising_weight": 0.0
 }
