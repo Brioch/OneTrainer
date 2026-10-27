@@ -678,6 +678,7 @@ def create_optimizer(
                 clip_threshold=optimizer_config.clip_threshold if optimizer_config.clip_threshold is not None else 1.0,
                 weight_decay=optimizer_config.weight_decay if optimizer_config.weight_decay is not None else 0.0,
                 polarity_history=optimizer_config.polarity_history if optimizer_config.polarity_history is not None else 8,
+                min_lr=optimizer_config.min_lr if optimizer_config.min_lr is not None else 1e-8,
             )
 
         # ADAMW_ADV Optimizer

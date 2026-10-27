@@ -133,6 +133,7 @@ class BaseOptimizerParamsWindowView:
             'auto_kappa_p': {'title': 'Auto Lion-K', 'tooltip': 'Automatically determines the optimal P-value based on layer dimensions. Uses p=2.0 (Spherical) for 4D (Conv) tensors for stability and rotational invariance, and p=1.0 (Sign) for 2D (Linear) tensors for sparsity. Overrides the manual P-value. Recommend for unet models.', 'type': 'bool'},
             'compile': {'title': 'Compiled Optimizer', 'tooltip': 'Enables PyTorch compilation for the optimizer internal step logic. This is intended to improve performance by allowing PyTorch to fuse operations and optimize the computational graph.', 'type': 'bool'},
             'polarity_history': {'title': 'Polarity History', 'tooltip': 'Automagic3 sign-history window length H (2-64). Longer windows make learning-rate changes rarer and more decisive, at the cost of more optimizer state and a longer warmup.', 'type': 'int'},
+            'min_lr': {'title': 'Min LR', 'tooltip': 'Automagic3 lower bound for its adaptive learning rate. Raise it if the learning rate walks down so low that training stalls.', 'type': 'float'},
         }
         # @formatter:on
 
