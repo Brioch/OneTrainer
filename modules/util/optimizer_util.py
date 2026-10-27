@@ -443,6 +443,7 @@ OPTIMIZER_DEFAULT_PARAMETERS = {
         "clip_threshold": 1.0,
         "weight_decay": 0.0,
         "polarity_history": 8,
+        "min_lr": 1e-8,
     },
     Optimizer.CAME_8BIT: {
         "beta1": 0.9,

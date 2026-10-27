@@ -139,6 +139,7 @@ class TrainOptimizerConfig(BaseConfig):
     auto_kappa_p: False
     compile: False
     polarity_history: int
+    min_lr: float
 
     def __init__(self, data: list[(str, Any, type, bool)]):
         super().__init__(data)
@@ -253,6 +254,7 @@ class TrainOptimizerConfig(BaseConfig):
         data.append(("auto_kappa_p", False, bool, False))
         data.append(("compile", False, bool, False))
         data.append(("polarity_history", None, int, True))
+        data.append(("min_lr", None, float, True))
 
         return TrainOptimizerConfig(data)
 

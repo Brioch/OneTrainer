@@ -1,0 +1,54 @@
+{
+    "base_model_name": "OpenMOSS-Team/MOSS-Image-Base",
+    "batch_size": 1,
+    "learning_rate": 0.0005,
+    "model_type": "MOSS_IMAGE",
+    "output_model_format": "COMFY_LORA",
+    "resolution": "1024",
+    "attention_mechanism": "CUDNN",
+    "compile": true,
+    "transformer": {
+        "train": true,
+        "weight_dtype": "INT_W8A8"
+    },
+    "text_encoder": {
+        "train": false,
+        "weight_dtype": "FLOAT_8"
+    },
+    "training_method": "LORA",
+    "vae": {
+        "weight_dtype": "FLOAT_32"
+    },
+    "train_dtype": "BFLOAT_16",
+    "weight_dtype": "BFLOAT_16",
+    "output_dtype": "BFLOAT_16",
+    "timestep_distribution": "LOGIT_NORMAL",
+    "layer_filter": "",
+    "layer_filter_preset": "full",
+    "quantization": {
+        "layer_filter": "layers.",
+        "layer_filter_preset": "blocks"
+    },
+    "timestep_shift": 1.0,
+    "layer_filter_regex": false,
+    "epochs": 125,
+    "clean_end_schedule": "",
+    "noising_bias": 1.15,
+    "noising_weight": 0.4,
+    "learning_rate_scheduler": "CONSTANT",
+    "learning_rate_warmup_steps": 0.0,
+    "optimizer": {
+        "optimizer": "AUTOMAGIC3",
+        "weight_decay": 1e-05,
+        "min_lr": 5e-05
+    },
+    "ema": "GPU",
+    "ema_decay": 0.98,
+    "ema_update_step_interval": 1,
+    "peft_type": "LOKR",
+    "lokr_decompose_factor": 4,
+    "lokr_full_matrix": true,
+    "lokr_vec_trick": true,
+    "save_every": 100,
+    "save_every_unit": "STEP"
+}
