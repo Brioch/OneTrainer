@@ -218,7 +218,7 @@ class BaseTrainingTabView(ABC):
 
         self.__create_base2_frame(column_1, 0, controller, ui_state)
         self.__create_transformer_frame(column_1, 1, ui_state, supports_guidance_scale=False, supports_force_attention_mask=False)
-        self.__create_noise_frame(column_1, 2, ui_state)
+        self.__create_noise_frame(column_1, 2, ui_state, supports_clean_end_schedule=True)
 
         self.__create_masked_frame(column_2, 1, ui_state)
         self.__create_loss_frame(column_2, 2, controller, ui_state)
@@ -737,7 +737,8 @@ class BaseTrainingTabView(ABC):
 
     def __create_noise_frame(self, master, row, ui_state,
                               supports_generalized_offset_noise: bool = False,
-                              supports_dynamic_timestep_shifting: bool = False):
+                              supports_dynamic_timestep_shifting: bool = False,
+                              supports_clean_end_schedule: bool = False):
         frame = self.components.section_frame(master, row)
 
         # offset noise weight
@@ -795,6 +796,15 @@ class BaseTrainingTabView(ABC):
             self.components.label(frame, 9, 0, "Dynamic Timestep Shifting",
                                   tooltip="Dynamically shift the timestep distribution based on resolution. If enabled, the shifting parameters are taken from the model's scheduler configuration and Timestep Shift is ignored. For Ideogram, the shifting instead follows the model's own resolution-aware sampling schedule. Note: For Z-Image, the dynamic shifting parameters are likely wrong and unknown. Use with care or set your own, fixed shift.", wide_tooltip=True)
             self.components.switch(frame, 9, 1, ui_state, "dynamic_timestep_shifting")
+
+        if supports_clean_end_schedule:
+            # clean-end schedule
+            self.components.label(frame, 10, 0, "Clean-End Schedule",
+                                  tooltip="Percentage of training steps on nearly-clean images (noise below half), where faces and fine detail are learned, optionally changing per epoch. "
+                                          "'40' keeps 40% for the whole run. '60:7:30:15:2' keeps 60% until epoch 7, eases down to 30% by epoch 15, then trains one epoch at 60% every 2nd epoch. "
+                                          "'75:5:40' uses 75% for 5 epochs, then 40%. "
+                                          "When set, it replaces Timestep Distribution, Noising Weight, Noising Bias and Timestep Shift. Leave empty to use those instead.", wide_tooltip=True)
+            self.components.entry(frame, 10, 1, ui_state, "clean_end_schedule")
 
     def __create_masked_frame(self, master, row, ui_state):
         frame = self.components.section_frame(master, row)
