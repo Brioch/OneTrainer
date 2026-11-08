@@ -16,8 +16,6 @@
 #     TensorBoard via Optimizer.maybe_adjust_lrs (the is_adaptive path).
 #
 
-from typing import List
-
 import torch
 
 
@@ -93,16 +91,16 @@ class Automagic3(torch.optim.Optimizer):
                 f"Note: start lr {lr} is high; the controller will correct it "
                 f"(the pooled vote will walk it down)."
             )
-        defaults = dict(
-            lr=lr,
-            min_lr=min_lr,
-            max_lr=max_lr,
-            beta2=beta2,
-            eps=eps,
-            clip_threshold=clip_threshold,
-            weight_decay=weight_decay,
-            polarity_history=max(2, min(64, int(polarity_history))),
-        )
+        defaults = {
+            "lr": lr,
+            "min_lr": min_lr,
+            "max_lr": max_lr,
+            "beta2": beta2,
+            "eps": eps,
+            "clip_threshold": clip_threshold,
+            "weight_decay": weight_decay,
+            "polarity_history": max(2, min(64, int(polarity_history))),
+        }
         super().__init__(params, defaults)
 
         self._rebuild_group_index()
@@ -171,8 +169,8 @@ class Automagic3(torch.optim.Optimizer):
         self._param_group_index = {
             p: gi for gi, group in enumerate(self.param_groups) for p in group["params"]
         }
-        self._group_num: List = [None] * len(self.param_groups)
-        self._group_den: List = [None] * len(self.param_groups)
+        self._group_num: list = [None] * len(self.param_groups)
+        self._group_den: list = [None] * len(self.param_groups)
 
     @classmethod
     def _stochastic_copy_(cls, dst: torch.Tensor, src_fp32: torch.Tensor) -> None:
@@ -356,7 +354,7 @@ class Automagic3(torch.optim.Optimizer):
             if lrs:
                 group["effective_lr"] = float(torch.stack(lrs).mean())
 
-    def get_learning_rates(self) -> List[float]:
+    def get_learning_rates(self) -> list[float]:
         out = []
         for group in self.param_groups:
             lrs = [
