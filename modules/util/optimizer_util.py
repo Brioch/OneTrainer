@@ -162,6 +162,7 @@ OPTIMIZER_DEFAULT_PARAMETERS = {
         "muon_te1_adam_lr": None,
         "muon_te2_adam_lr": None,
         "muon_adam_config": {},
+        "muon_match_adamw_lr": False,
     },
     Optimizer.AdEMAMix_8BIT: {
         "beta1": 0.9,

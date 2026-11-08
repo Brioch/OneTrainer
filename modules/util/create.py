@@ -904,9 +904,15 @@ def create_optimizer(
         # MUON Optimizer
         case Optimizer.MUON:
 
-            from muon import MuonWithAuxAdam, SingleDeviceMuonWithAuxAdam
+            from modules.util.optimizer.batched_muon import BatchedSingleDeviceMuonWithAuxAdam
+
+            from muon import MuonWithAuxAdam
 
             params_for_optimizer, ___ = split_parameters_for_muon(parameters, layer_key_fn, config)
+            distributed = multi.world_size() > 1
+            match_adamw_lr = bool(optimizer_config.muon_match_adamw_lr)
+            if match_adamw_lr and distributed:
+                raise ValueError("'Match AdamW LR' is not supported by MUON with multiple GPUs")
 
             final_param_groups  = []
             for group in params_for_optimizer:
@@ -920,6 +926,8 @@ def create_optimizer(
                         'momentum': optimizer_config.momentum if optimizer_config.momentum is not None else 0.95,
                         'weight_decay': optimizer_config.weight_decay if optimizer_config.weight_decay is not None else 0.0,
                     }
+                    if not distributed:
+                        final_group['match_rms_adamw'] = match_adamw_lr
                 else:  # is adam
                     adam_config = optimizer_config.muon_adam_config
                     if not isinstance(adam_config, dict):
@@ -941,7 +949,8 @@ def create_optimizer(
                     }
                 final_param_groups.append(final_group)
 
-            OptimizerClass = MuonWithAuxAdam if multi.world_size() > 1 else SingleDeviceMuonWithAuxAdam
+            # single device: Keller's update with the per-matrix work batched (same results, much faster for LoRAs)
+            OptimizerClass = MuonWithAuxAdam if distributed else BatchedSingleDeviceMuonWithAuxAdam
             optimizer = OptimizerClass(param_groups=final_param_groups )
 
             # Add metadata back to the optimizer's param_groups for the framework to use.

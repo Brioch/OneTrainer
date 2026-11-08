@@ -1,11 +1,14 @@
 # pytorch
---extra-index-url https://download.pytorch.org/whl/cu130
-torch==2.12.0+cu130
-torchvision==0.27.0+cu130
+# torch 2.15: with the gradient checkpoint inside a compiled block (CheckpointLayer.compile), older versions kept
+# several full-width activations per block for the backward pass; 2.15 keeps far fewer (Fizgig measured MOSS-Image
+# batch 3: 21 GB -> 6.7 GB going from 2.10). No cu130 build of 2.15 exists; cu134 needs a CUDA 13 driver.
+--extra-index-url https://download.pytorch.org/whl/cu134
+torch==2.15.0+cu134
+torchvision==0.29.2+cu134
 onnxruntime-gpu==1.23.2
-nvidia-nccl-cu13==2.29.7; sys_platform == "linux"
+nvidia-nccl-cu13==2.30.7; sys_platform == "linux"
 nvidia-nvcomp-cu13==5.3.0.16
-triton-windows==3.7.0.post26; sys_platform == "win32"
+triton-windows==3.9.0.post30; sys_platform == "win32"
 
 # optimizers
-bitsandbytes==0.49.1 # bitsandbytes for 8-bit optimizers and weight quantization
+bitsandbytes==0.50.2 # bitsandbytes for 8-bit optimizers and weight quantization
